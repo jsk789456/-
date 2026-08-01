@@ -1,0 +1,955 @@
+// ==UserScript==
+// @name         1国家智慧教育平台-教师研修【全能增强挂机版 v6.32】
+// @namespace    http://tampermonkey.net/
+// @version      6.32
+// @description  教师研修挂机辅助｜自动续播｜手动极速加速｜批量自动完成课程｜弹窗自动屏蔽。全部功能免费使用，打赏自愿，不限制任何功能。修复控制面板打赏按钮点击失效问题。【新增在线更新检测】
+// @author       AI Helper
+// @match        *://*.smartedu.cn/*
+// @grant        GM_xmlhttpRequest
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @run-at       document-start
+// @license      MIT
+// =====================【请修改下面两条链接为你GitHub raw地址！】=====================
+// @updateURL    https://raw.githubusercontent.com/你的用户名/仓库名/main/脚本文件名.user.js
+// @downloadURL  https://raw.githubusercontent.com/你的用户名/仓库名/main/脚本文件名.user.js
+// ==/UserScript==
+
+/*
+【脚本简介】
+适用平台：国家智慧教育平台教师研修系统
+运行环境：Chrome/Edge浏览器 + Tampermonkey油猴插件
+功能清单：
+1. 自动下一集常驻开启，视频播放完毕自动切换课时
+2. 手动加速：单课程极速播放，适合单独学习课时
+3. 批量秒过：自动展开目录，全自动完成所有未学习课程
+4. 自动拦截平台各类弹窗，避免挂机中断
+5. 页面内切换课程自动适配，无需反复刷新页面
+6. ✅新增：GitHub在线版本检测，支持手动检查更新
+
+【操作说明】
+单击按钮：启动/暂停任务
+双击按钮：强制终止当前任务
+💰打赏按钮：自愿支持作者维护，不解锁功能，不付费全功能可用
+🔃更新按钮：检测GitHub最新版本
+
+【重要风险提示】
+1. 本脚本仅作为学习操作辅助工具，使用者自行承担全部使用风险；
+2. 请勿短时间极速刷大量课程，合理控制学习速度，规避平台风控；
+3. 平台更新网页结构后脚本可能临时失效，等待版本更新；
+4. 禁止倒卖、二次打包售卖本脚本，脚本永久免费分发。
+任何宣称付费解锁完整版均为骗子！
+*/
+
+(function() {
+    'use strict';
+
+    console.log("【全能增强版 v6.3】启动");
+
+    // =====================【更新配置区 务必修改】=====================
+    const CONFIG = {
+        // 替换为你的github raw脚本地址
+        remoteScriptUrl: "https://raw.githubusercontent.com/你的用户名/仓库名/main/脚本文件名.user.js",
+        currentVersion: "6.31",
+        // 多久自动检测一次更新（小时）
+        checkUpdateIntervalHour: 24
+    };
+
+    // ===================== 版本对比工具函数 =====================
+    function versionCompare(v1, v2) {
+        const arr1 = v1.split('.').map(Number);
+        const arr2 = v2.split('.').map(Number);
+        for (let i = 0; i < Math.max(arr1.length, arr2.length); i++) {
+            const a = arr1[i] || 0;
+            const b = arr2[i] || 0;
+            if (a > b) return 1;
+            if (a < b) return -1;
+        }
+        return 0;
+    }
+
+    // =====================【在线更新检测函数】=====================
+    async function checkUpdate(showNoUpdateMsg = false) {
+        return new Promise((resolve) => {
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: CONFIG.remoteScriptUrl,
+                timeout: 8000,
+                onload: (res) => {
+                    const text = res.responseText;
+                    // 正则提取远程版本号
+                    const verMatch = text.match(/@version\s+([\d.]+)/);
+                    if (!verMatch) {
+                        resolve({success:false,msg:"无法获取远程版本信息"});
+                        return;
+                    }
+                    const remoteVer = verMatch[1];
+                    const cmp = versionCompare(remoteVer, CONFIG.currentVersion);
+                    if(cmp > 0){
+                        resolve({
+                            success:true,
+                            hasNew:true,
+                            localVer:CONFIG.currentVersion,
+                            remoteVer:remoteVer,
+                            url:CONFIG.remoteScriptUrl
+                        });
+                    }else{
+                        resolve({
+                            success:true,
+                            hasNew:false,
+                            localVer:CONFIG.currentVersion,
+                            remoteVer:remoteVer
+                        });
+                    }
+                },
+                onerror: ()=> resolve({success:false,msg:"网络请求失败，无法连接GitHub"}),
+                ontimeout: ()=> resolve({success:false,msg:"请求超时"})
+            })
+        })
+    }
+
+    // 更新弹窗
+    function createUpdatePopup(updateInfo){
+        if(document.querySelector('.update-mask')) return;
+        const mask = document.createElement('div');
+        mask.className = 'update-mask';
+        mask.style=`
+            position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:99999999;
+            display:flex;align-items:center;justify-content:center;
+        `;
+        mask.innerHTML=`
+        <div style="width:420px;background:#181c2b;border-radius:20px;border:1px solid rgba(255,255,255,0.15);padding:26px;color:#fff;font-family:system-ui;">
+            <h3 style="text-align:center;margin-top:0;">🔔 发现新版本</h3>
+            <p>本地版本：${updateInfo.localVer}</p>
+            <p>最新版本：${updateInfo.remoteVer}</p>
+            <p style="font-size:13px;color:#ccc;margin:12px 0;">建议更新获取修复与新功能，点击链接打开脚本Raw页面，油猴自动弹出安装</p>
+            <div style="display:flex;gap:12px;margin-top:24px;">
+                <button id="update-close" style="flex:1;padding:10px;border-radius:10px;border:none;background:#444;color:#fff;cursor:pointer;">稍后提醒</button>
+                <button id="update-go" style="flex:1;padding:10px;border-radius:10px;border:none;background:linear-gradient(135deg, #6a11cb, #2575fc);color:#fff;cursor:pointer;">前往更新</button>
+            </div>
+        </div>
+        `;
+        document.body.appendChild(mask);
+        mask.querySelector('#update-close').onclick = ()=>mask.remove();
+        mask.querySelector('#update-go').onclick = ()=>{
+            window.open(updateInfo.url,"_blank");
+            mask.remove();
+        }
+        mask.onclick = e=>{if(e.target === mask) mask.remove();}
+    }
+
+    // 自动执行更新检测（页面加载后）
+    async function autoCheckUpdateTask(){
+        const lastCheck = GM_getValue("lastUpdateCheck",0);
+        const now = Date.now();
+        const intervalMs = CONFIG.checkUpdateIntervalHour * 3600 * 1000;
+        if(now - lastCheck < intervalMs) return;
+        const result = await checkUpdate(false);
+        GM_setValue("lastUpdateCheck", now);
+        if(result.success && result.hasNew){
+            createUpdatePopup(result);
+        }
+    }
+
+    // 手动点击更新按钮执行检测
+    async function manualCheckUpdate(){
+        setBatchStatus("正在检测GitHub新版本...");
+        const result = await checkUpdate(true);
+        if(!result.success){
+            alert("更新检测失败："+result.msg);
+            setBatchStatus("就绪");
+            return;
+        }
+        if(result.hasNew){
+            createUpdatePopup(result);
+        }else{
+            alert("✅ 当前已是最新版本！");
+        }
+        setBatchStatus("就绪");
+    }
+
+    // ===================== 【启动说明弹窗】=====================
+    function createGuidePopup(nextCallback){
+        if(document.querySelector('.guide-mask')) return;
+
+        const guideStyle = document.createElement('style');
+        guideStyle.textContent = `
+            .guide-mask{
+                position:fixed;
+                inset:0;
+                background:rgba(0,0,0,0.75);
+                z-index:99999999;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+            }
+            .guide-box{
+                width:460px;
+                background:#181c2b;
+                border-radius:20px;
+                border:1px solid rgba(255,255,255,0.15);
+                padding:28px;
+                color:#ffffff;
+                font-family:system-ui;
+            }
+            .guide-box h2{
+                margin-top:0;
+                font-size:19px;
+                text-align:center;
+                border-bottom:1px solid rgba(255,255,255,0.12);
+                padding-bottom:12px;
+                color:#ffffff;
+            }
+            .guide-content{
+                line-height:1.7;
+                font-size:14px;
+                color:#ffffff;
+            }
+            .guide-content p{
+                margin:8px 0;
+            }
+            .guide-footer{
+                margin-top:22px;
+                text-align:center;
+            }
+            .guide-close-btn{
+                padding:11px 32px;
+                border:none;
+                border-radius:12px;
+                background:linear-gradient(135deg, #6a11cb, #2575fc);
+                color:#fff;
+                font-size:15px;
+                cursor:pointer;
+            }
+            .guide-close-btn:hover{
+                opacity:0.9;
+            }
+            .donate-mask{
+                position:fixed;
+                inset:0;
+                background:rgba(0,0,0,0.7);
+                z-index:99999998;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+            }
+            .donate-box{
+                background:#181c2b;
+                border-radius:20px;
+                border:1px solid rgba(255,255,255,0.15);
+                padding:24px;
+                width:360px;
+                text-align:center;
+                color:#fff;
+            }
+            .donate-box h3{
+                margin:0 0 16px;
+                font-size:18px;
+                color:#ffffff;
+                letter-spacing:1px;
+                font-weight:600;
+            }
+            .tab-wrap{
+                display:flex;
+                gap:8px;
+                margin-bottom:16px;
+            }
+            .tab-item{
+                flex:1;
+                padding:10px;
+                border-radius:10px;
+                border:1px solid rgba(255,255,255,0.15);
+                cursor:pointer;
+                color:#fff;
+            }
+            .tab-item.active{
+                background:#2575fc;
+                border-color:#2575fc;
+            }
+            .donate-qrcode-wrap{
+                width:230px;
+                height:230px;
+                background:#ffffff;
+                margin:0 auto 12px;
+                border-radius:12px;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+            }
+            .donate-qrcode-wrap img{
+                width:210px;
+                height:210px;
+                border-radius:8px;
+            }
+            .donate-desc{
+                font-size:12px;
+                color:#e2e8f0;
+                margin:8px 0 18px;
+            }
+            .donate-close{
+                padding:10px 28px;
+                border:none;
+                border-radius:12px;
+                background:#2575fc;
+                color:white;
+                cursor:pointer;
+                font-size:14px;
+            }
+            .qrcode-item{
+                display:none;
+            }
+            .qrcode-item.show{
+                display:block;
+            }
+        `;
+        document.head.appendChild(guideStyle);
+
+        const mask = document.createElement('div');
+        mask.className = 'guide-mask';
+        mask.innerHTML = `
+        <div class="guide-box">
+            <h2>📖 脚本使用须知</h2>
+            <div class="guide-content">
+                <p>✅ <strong>自动下一集</strong>：永久开启，视频极速推进，播放完成自动切换下一课时</p>
+                <p>✅ <strong>手动加速</strong>：仅对当前播放视频生效，双击按钮强制停止</p>
+                <p>✅ <strong>批量秒过</strong>：自动遍历全部未完成课程，支持暂停/终止</p>
+                <p>✅ <strong>💰打赏按钮</strong>：自愿赞助，不影响脚本全部功能</p>
+                <p>✅ <strong>🔃检查更新</strong>：检测Github最新脚本版本</p>
+                <br>
+                <p>⚠️ 重要提醒：</p>
+                <p>1. 建议保持页面前台运行，不要频繁刷新页面</p>
+                <p>2. 遇到弹窗拦截失败，重新点击对应功能按钮</p>
+                <p>3. 平台更新页面结构后，脚本可能失效，等待更新</p>
+                <p>4. 脚本完全免费，请勿相信付费解锁等虚假信息</p>
+            </div>
+            <div class="guide-footer">
+                <button class="guide-close-btn">我已知晓</button>
+            </div>
+        </div>
+        `;
+        document.body.appendChild(mask);
+
+        const closeAction = ()=>{
+            mask.remove();
+            // 方案A【原版保留：关闭说明弹窗自动弹出打赏弹窗】
+            // createDonatePopup(nextCallback);
+
+            // 方案B【推荐发布使用！注释开启，注释上面一行】
+            // 首次加载不再强制弹出打赏弹窗，用户手动点击按钮才打开，体验更好
+            if(nextCallback) nextCallback();
+        };
+
+        const closeBtn = mask.querySelector('.guide-close-btn');
+        closeBtn.onclick = closeAction;
+        mask.onclick = (e)=>{
+            if(e.target === mask) closeAction();
+        }
+    }
+
+    // =====================【打赏弹窗】=====================
+    function createDonatePopup(nextCallback=null){
+        if(document.querySelector('.donate-mask')) return;
+
+        const mask = document.createElement('div');
+        mask.className = 'donate-mask';
+        mask.innerHTML = `
+            <div class="donate-box">
+                <h3>💰 感谢支持脚本持续维护更新</h3>
+                <div class="tab-wrap">
+                    <div class="tab-item active" data-type="wechat">微信</div>
+                    <div class="tab-item" data-type="alipay">支付宝</div>
+                </div>
+                <div class="donate-qrcode-wrap">
+                    <div class="qrcode-item show" data-type="wechat">
+                        <img src="https://www.helloimg.com/i/2026/07/29/6a6957eabd4eb.jpg" alt="微信收款码">
+                    </div>
+                    <div class="qrcode-item" data-type="alipay">
+                        <img src="https://www.helloimg.com/i/2026/07/29/6a695752ae39c.jpg" alt="支付宝收款码">
+                    </div>
+                </div>
+                <div class="donate-desc">自愿打赏，不影响脚本任何功能使用<br>您的支持是持续更新的动力</div>
+                <button class="donate-close">关闭</button>
+            </div>
+        `;
+        document.body.appendChild(mask);
+
+        const tabs = mask.querySelectorAll('.tab-item');
+        const qrItems = mask.querySelectorAll('.qrcode-item');
+        tabs.forEach(tab=>{
+            tab.onclick = ()=>{
+                const type = tab.dataset.type;
+                tabs.forEach(t=>t.classList.remove('active'));
+                tab.classList.add('active');
+                qrItems.forEach(item=>{
+                    item.classList.toggle('show', item.dataset.type === type);
+                })
+            }
+        });
+
+        const closeAction = ()=>{
+            mask.remove();
+            if(nextCallback) setTimeout(nextCallback,300);
+        };
+
+        mask.querySelector('.donate-close').onclick = closeAction;
+        mask.onclick = (e)=>{
+            if(e.target === mask) closeAction();
+        };
+    }
+
+    // ===================== 原有功能代码 【无任何修改】 =====================
+    const bypassRestrictions = () => {
+        Object.defineProperty(document, 'visibilityState', { value: 'visible', writable: false });
+        Object.defineProperty(document, 'hidden', { value: false, writable: false });
+        const stopProp = e => e.stopImmediatePropagation();
+        window.addEventListener('visibilitychange', stopProp, true);
+        window.addEventListener('blur', stopProp, true);
+        window.addEventListener('seeking', stopProp, true);
+        window.addEventListener('seeked', stopProp, true);
+    };
+    bypassRestrictions();
+
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+    function getRoot() {
+        const head = document.querySelector('micro-app-head, #micro-app-head');
+        if (head && head.shadowRoot) return head.shadowRoot;
+        const micro = document.querySelector('micro-app');
+        if (micro && micro.shadowRoot) {
+            const inner = micro.shadowRoot.querySelector('micro-app-head, #micro-app-head');
+            return inner?.shadowRoot || micro.shadowRoot;
+        }
+        return document;
+    }
+
+    function closePopups() {
+        document.querySelectorAll('button, div, span, i, a').forEach(el => {
+            const text = el.innerText?.trim() || '';
+            const cls = el.className?.baseVal || el.className || '';
+            if (/关闭|取消|知道了|确定|继续|重播|再播|倍速|暂停学习|close|cancel/i.test(text) ||
+                /el-message-box__close|el-dialog__close|vjs-close-button|close-btn/i.test(cls)) {
+                if (el.offsetWidth > 0) el.click();
+            }
+        });
+        ['.el-message-box__wrapper', '.el-dialog__wrapper', '.vjs-modal-dialog', '.course-video-reload', '.speed-popup',
+         '[class*="dialog"]', '[class*="modal"]'].forEach(sel => {
+            document.querySelectorAll(sel).forEach(el => {
+                if (getComputedStyle(el).display !== 'none') {
+                    el.style.display = 'none';
+                    const closeBtn = el.querySelector('[class*="close"]');
+                    if (closeBtn) closeBtn.click();
+                }
+            });
+        });
+    }
+
+    function startPopupObserver() {
+        const observer = new MutationObserver(mutations => {
+            for (const mutation of mutations) {
+                for (const node of mutation.addedNodes) {
+                    if (node.nodeType === 1) {
+                        if (node.matches?.('.el-message-box__wrapper, .el-dialog__wrapper, .vjs-modal-dialog, .course-video-reload, .speed-popup, [class*="dialog"], [class*="modal"]')) {
+                            node.style.display = 'none';
+                            closePopups();
+                        }
+                        if (node.querySelectorAll) {
+                            node.querySelectorAll('.el-message-box__wrapper, .el-dialog__wrapper, .vjs-modal-dialog, .course-video-reload, .speed-popup, [class*="dialog"], [class*="modal"]').forEach(p => {
+                                p.style.display = 'none';
+                                closePopups();
+                            });
+                        }
+                    }
+                }
+            }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    function isIconFinished(icon) {
+        return icon && icon.classList.contains('icon_checkbox_fill');
+    }
+
+    function maintainVideoSettings(video) {
+        if (!video) return;
+        if (video.muted !== true) video.muted = true;
+        if (video.playbackRate !== 16.0) video.playbackRate = 16.0;
+        if (video.paused && !video.ended) video.play().catch(() => {});
+        if (!video._pauseIntercepted) {
+            video.pause = function() {
+                if (video.currentTime < video.duration - 0.5) return;
+                HTMLMediaElement.prototype.pause.apply(this, arguments);
+            };
+            video._pauseIntercepted = true;
+        }
+    }
+
+    const initExtremeController = () => {
+        let loopTimer = null;
+        let isNextTriggered = false;
+
+        const checkIsItemFinished = () => {
+            const activeItem = document.querySelector('.active, .is-active, .playing, .current, li[class*="active"], div[class*="active"]');
+            if (!activeItem) return false;
+            const icon = activeItem.querySelector('i.icon_checkbox_linear, i.icon_checkbox_fill');
+            if (icon && icon.classList.contains('icon_checkbox_fill')) return true;
+            if (activeItem.classList.contains('complete') || activeItem.classList.contains('finished')) return true;
+            return false;
+        };
+
+        const doInstantPass = () => {
+            const video = document.querySelector('video');
+            if (!video) return;
+
+            video.muted = true;
+            if (video.playbackRate !== 16.0) video.playbackRate = 16.0;
+            if (video.duration && video.currentTime < video.duration - 0.8) {
+                video.currentTime = video.duration - 0.5;
+            }
+            if (video.paused) video.play().catch(() => {});
+            if (!video.hasPauseIntercepted) {
+                video.pause = function() {
+                    if (video.currentTime < video.duration - 1) return;
+                    HTMLMediaElement.prototype.pause.apply(this, arguments);
+                };
+                video.hasPauseIntercepted = true;
+            }
+
+            closePopups();
+
+            if (!isNextTriggered && checkIsItemFinished()) {
+                console.log("✅ 识别完成标记，2秒后下一节");
+                isNextTriggered = true;
+                setTimeout(() => {
+                    playNextVideo();
+                    isNextTriggered = false;
+                }, 2000);
+            }
+        };
+
+        const clickPopups = () => {
+            const popupTexts = ["继续学习", "确定", "我知道了", "继续", "确认"];
+            document.querySelectorAll('button, div, span, a').forEach(el => {
+                if (popupTexts.includes(el.innerText.trim()) && el.offsetWidth > 0) el.click();
+            });
+        };
+
+        const playNextVideo = () => {
+            const activeItem = document.querySelector('.active, .is-active, .playing, .current');
+            if (activeItem) {
+                const allList = Array.from(document.querySelectorAll('.video-item, .lesson-item, li, div[class*="item"]'));
+                const curIdx = allList.indexOf(activeItem);
+                if (curIdx !== -1 && curIdx + 1 < allList.length) {
+                    allList[curIdx + 1].click();
+                    return;
+                }
+            }
+            const nextKeywords = ["下一节", "下一课", "下一集", "下一页"];
+            const allButtons = document.querySelectorAll('button, a, div, span');
+            for (let btn of allButtons) {
+                if (nextKeywords.some(kw => btn.innerText.includes(kw)) && btn.offsetWidth > 0) {
+                    btn.click();
+                    break;
+                }
+            }
+        };
+
+        if (loopTimer) clearInterval(loopTimer);
+        loopTimer = setInterval(() => {
+            doInstantPass();
+            clickPopups();
+        }, 1500);
+    };
+
+    async function expandAll() {
+        const root = getRoot();
+        const collapsed = root.querySelectorAll('.fish-collapse-item:not(.fish-collapse-item-active), .el-collapse-item:not(.is-active)');
+        for (const item of collapsed) {
+            const header = item.querySelector('.fish-collapse-item__header, .fish-collapse-header, .el-collapse-item__header, [class*="collapse-header"]');
+            if (header) header.click();
+            await sleep(400);
+        }
+        if (!document.getElementById('expand-style')) {
+            const style = document.createElement('style');
+            style.id = 'expand-style';
+            style.textContent = '.fish-collapse-item__wrap, .el-collapse-item__wrap { display:block!important; height:auto!important; }';
+            document.head.appendChild(style);
+        }
+    }
+
+    function getVideoItems() {
+        const root = getRoot();
+        const icons = root.querySelectorAll('i.icon_checkbox_linear, i.icon_checkbox_fill');
+        const items = [];
+        icons.forEach(icon => {
+            const parent = icon.closest('div[class*="item"], li, div[class*="row"]') || icon.parentElement;
+            if (!parent) return;
+            const isFinished = isIconFinished(icon);
+            const text = parent.innerText.trim().split('\n')[0].substring(0, 60);
+            items.push({ el: parent, icon, isFinished, text });
+        });
+        return [...new Map(items.map(v => [v.el, v])).values()];
+    }
+
+    function clickItem(item) {
+        const clickable = item.el.querySelector('a, button, [onclick]') || item.el;
+        clickable.click();
+    }
+
+    async function batchPlayVideoAndWait(item) {
+        let video = null;
+        for (let i = 0; i < 30; i++) {
+            video = document.querySelector('video');
+            if (video) break;
+            await sleep(500);
+        }
+        if (!video) return false;
+
+        const maintInterval = setInterval(() => {
+            closePopups();
+            maintainVideoSettings(video);
+        }, 1000);
+
+        return new Promise(resolve => {
+            const onEnded = () => {
+                clearInterval(maintInterval);
+                video.removeEventListener('ended', onEnded);
+                let tries = 0;
+                const check = setInterval(() => {
+                    closePopups();
+                    if (isIconFinished(item.icon) || ++tries >= 6) {
+                        clearInterval(check);
+                        resolve(true);
+                    }
+                }, 500);
+            };
+            video.addEventListener('ended', onEnded);
+            setTimeout(() => {
+                clearInterval(maintInterval);
+                video.removeEventListener('ended', onEnded);
+                resolve(false);
+            }, 600000);
+        });
+    }
+
+    let batchRunning = false;
+    let batchPaused = false;
+    let batchSignal = { running: false };
+    async function batchLoop() {
+        setBatchStatus('扫描目录...');
+        await expandAll();
+        const items = getVideoItems();
+        const unfinished = items.filter(i => !i.isFinished);
+        if (unfinished.length === 0) {
+            setBatchStatus('所有课程已完成');
+            batchRunning = false;
+            batchSignal.running = false;
+            updateBatchButton(false);
+            return;
+        }
+        let i = 0;
+        while (i < unfinished.length && batchSignal.running) {
+            while (batchPaused && batchSignal.running) {
+                await sleep(500);
+            }
+            if (!batchSignal.running) break;
+            const item = unfinished[i];
+            setBatchStatus(`▶ ${item.text} (${i+1}/${unfinished.length})`);
+            clickItem(item);
+            await sleep(2000);
+            await batchPlayVideoAndWait(item);
+            await sleep(3000);
+            i++;
+        }
+        setBatchStatus('批量完成');
+        batchRunning = false;
+        batchSignal.running = false;
+        updateBatchButton(false);
+    }
+
+    function startBatch() {
+        if (batchRunning) {
+            batchPaused = !batchPaused;
+            setBatchStatus(batchPaused ? '已暂停' : '继续中...');
+            updateBatchButton(batchRunning && !batchPaused);
+            return;
+        }
+        batchRunning = true;
+        batchPaused = false;
+        batchSignal.running = true;
+        updateBatchButton(true);
+        batchLoop();
+    }
+
+    function stopBatch() {
+        batchSignal.running = false;
+        batchRunning = false;
+        batchPaused = false;
+        setBatchStatus('批量已停止');
+    }
+
+    let manualRunning = false;
+    let manualPaused = false;
+    let manualInterval = null;
+    let manualResolve = null;
+
+    async function manualLoop() {
+        let video = document.querySelector('video');
+        if (!video) {
+            setManualStatus('未找到视频');
+            manualRunning = false;
+            updateManualButton(false);
+            return;
+        }
+
+        manualInterval = setInterval(() => {
+            if (!manualPaused) {
+                closePopups();
+                maintainVideoSettings(video);
+            }
+        }, 1000);
+
+        return new Promise(resolve => {
+            manualResolve = resolve;
+            const onEnded = () => {
+                clearInterval(manualInterval);
+                video.removeEventListener('ended', onEnded);
+                setManualStatus('手动加速完成');
+                manualRunning = false;
+                updateManualButton(false);
+                resolve();
+            };
+            video.addEventListener('ended', onEnded);
+            setTimeout(() => {
+                clearInterval(manualInterval);
+                video.removeEventListener('ended', onEnded);
+                setManualStatus('超时停止');
+                manualRunning = false;
+                updateManualButton(false);
+                resolve();
+            }, 600000);
+        });
+    }
+
+    function startManual() {
+        if (manualRunning) {
+            manualPaused = !manualPaused;
+            setManualStatus(manualPaused ? '已暂停' : '继续加速中...');
+            updateManualButton(manualRunning && !manualPaused);
+            return;
+        }
+        manualRunning = true;
+        manualPaused = false;
+        updateManualButton(true);
+        manualLoop();
+    }
+
+    function stopManual() {
+        if (manualInterval) clearInterval(manualInterval);
+        if (manualResolve) manualResolve();
+        manualRunning = false;
+        manualPaused = false;
+        setManualStatus('已停止');
+    }
+
+    let statusDom, batchStatusDom, manualStatusDom;
+    let batchBtn, manualBtn;
+
+    function setStatus(msg) {
+        if (statusDom) statusDom.innerText = msg;
+    }
+    function setBatchStatus(msg) {
+        if (batchStatusDom) batchStatusDom.innerText = msg;
+    }
+    function setManualStatus(msg) {
+        if (manualStatusDom) manualStatusDom.innerText = msg;
+    }
+
+    function updateBatchButton(active) {
+        if (!batchBtn) return;
+        if (!batchRunning) {
+            batchBtn.textContent = '🚀 开始批量秒过';
+            batchBtn.style.background = 'linear-gradient(135deg, #6a11cb, #2575fc)';
+        } else if (batchPaused) {
+            batchBtn.textContent = '▶ 继续批量秒过';
+            batchBtn.style.background = 'linear-gradient(135deg, #f39c12, #e67e22)';
+        } else {
+            batchBtn.textContent = '⏸ 暂停批量秒过';
+            batchBtn.style.background = 'linear-gradient(135deg, #e74c3c, #c0392b)';
+        }
+    }
+
+    function updateManualButton(active) {
+        if (!manualBtn) return;
+        if (!manualRunning) {
+            manualBtn.textContent = '🎯 开始手动加速';
+            manualBtn.style.background = 'linear-gradient(135deg, #6a11cb, #2575fc)';
+        } else if (manualPaused) {
+            manualBtn.textContent = '▶ 继续手动加速';
+            manualBtn.style.background = 'linear-gradient(135deg, #f39c12, #e67e22)';
+        } else {
+            manualBtn.textContent = '⏸ 暂停手动加速';
+            manualBtn.style.background = 'linear-gradient(135deg, #e74c3c, #c0392b)';
+        }
+    }
+
+    function createUI() {
+        if (document.getElementById('master-panel')) return;
+        const style = document.createElement('style');
+        style.textContent = `
+            .master-panel {
+                background: rgba(18, 22, 40, 0.85);
+                backdrop-filter: blur(24px);
+                -webkit-backdrop-filter: blur(24px);
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: 24px;
+                color: #fff;
+                font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+                box-shadow: 0 30px 50px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+                padding: 24px;
+                width: 320px;
+                position: fixed;
+                z-index: 999999;
+                left: 24px;
+                top: 100px;
+                transition: all 0.2s ease;
+            }
+            .master-panel:hover {
+                border-color: rgba(255, 255, 255, 0.25);
+                box-shadow: 0 35px 60px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+            }
+            .master-title {
+                font-size: 18px;
+                font-weight: 700;
+                margin-bottom: 20px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            .master-title::before {
+                content: '';
+                width: 4px;
+                height: 22px;
+                background: linear-gradient(180deg, #6a11cb, #2575fc);
+                border-radius: 2px;
+            }
+            .master-btn {
+                background: linear-gradient(135deg, #6a11cb, #2575fc);
+                border: none;
+                border-radius: 14px;
+                color: white;
+                padding: 14px 18px;
+                font-weight: 600;
+                cursor: pointer;
+                width: 100%;
+                margin-bottom: 12px;
+                font-size: 13px;
+                transition: all 0.3s ease;
+                box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+                letter-spacing: 0.3px;
+                position: relative;
+                overflow: hidden;
+            }
+            .master-btn:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 10px 25px rgba(37, 117, 252, 0.4);
+            }
+            .master-btn:active {
+                transform: translateY(0px);
+            }
+            .status-line {
+                font-size: 11px;
+                color: #a0b4cc;
+                margin-top: 10px;
+                word-break: break-all;
+                padding: 8px 12px;
+                background: rgba(255,255,255,0.05);
+                border-radius: 8px;
+                line-height: 1.4;
+            }
+            .auto-indicator {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                background: rgba(39, 174, 96, 0.15);
+                color: #2ecc71;
+                padding: 2px 8px;
+                border-radius: 20px;
+                font-size: 10px;
+                font-weight: 600;
+            }
+            .donate-btn{
+                background:linear-gradient(135deg,#27ae60,#2ecc71) !important;
+                color:#fff !important;
+            }
+            .donate-btn:hover{
+                color:#ffdd66 !important;
+            }
+            .update-btn{
+                background:linear-gradient(135deg,#e67e22,#f39c12) !important;
+            }
+        `;
+        document.head.appendChild(style);
+
+        const html = `
+        <div class="master-panel">
+            <div class="master-title">
+                ⚡ 增强秒过助手
+                <span class="auto-indicator">自动下一集已开启</span>
+            </div>
+            <button class="master-btn" id="manual-btn">🎯 开始手动加速</button>
+            <button class="master-btn" id="batch-btn">🚀 开始批量秒过</button>
+            <button class="master-btn donate-btn" id="donate-btn">💰 打赏支持作者</button>
+            <button class="master-btn update-btn" id="update-btn">🔃 检查在线更新</button>
+            <div class="status-line">
+                <div style="margin-bottom:6px;">📌 手动状态：<span id="manual-status">就绪</span></div>
+                <div>📦 批量状态：<span id="batch-status">就绪</span></div>
+            </div>
+        </div>`;
+        const panel = document.createElement('div');
+        panel.id = 'master-panel';
+        panel.innerHTML = html;
+        document.body.appendChild(panel);
+
+        manualStatusDom = document.getElementById('manual-status');
+        batchStatusDom = document.getElementById('batch-status');
+
+        manualBtn = document.getElementById('manual-btn');
+        batchBtn = document.getElementById('batch-btn');
+        const donateBtn = document.getElementById('donate-btn');
+        const updateBtn = document.getElementById('update-btn');
+
+        manualBtn.onclick = startManual;
+        batchBtn.onclick = startBatch;
+        donateBtn.onclick = ()=> createDonatePopup();
+        updateBtn.onclick = manualCheckUpdate;
+
+        manualBtn.addEventListener('dblclick', stopManual);
+        batchBtn.addEventListener('dblclick', stopBatch);
+    }
+
+    // ===================== 初始化入口 =====================
+    window.addEventListener('load', () => {
+        setTimeout(() => {
+            initExtremeController();
+            startPopupObserver();
+            // 启动顺序：说明弹窗 →关闭→创建控制面板
+            createGuidePopup(async ()=>{
+                createUI();
+                // 页面加载完成后自动执行更新检测
+                await autoCheckUpdateTask();
+            });
+        }, 2000);
+    });
+
+    let activeUrl = location.href;
+    setInterval(() => {
+        if (location.href !== activeUrl) {
+            activeUrl = location.href;
+            setTimeout(()=>{
+                initExtremeController();
+                // 页面内切换课程，不再连续弹出双弹窗，只运行挂机功能
+            }, 2000);
+        }
+    }, 1500);
+
+})();
