@@ -1,8 +1,8 @@
-// ==UserScript==
+// ==用户脚本==
 // @name         1国家智慧教育平台-教师研修【全能增强挂机版 v6.32】
 // @namespace    http://tampermonkey.net/
 // @version      6.32
-// @description  教师研修挂机辅助｜自动续播｜手动极速加速｜批量自动完成课程｜弹窗自动屏蔽。全部功能免费使用，打赏自愿，不限制任何功能。修复控制面板打赏按钮点击失效问题。【新增在线更新检测】
+// @description 教师研修挂机辅助｜自动续播｜手动极速加速｜批量自动完成课程｜弹窗自动屏蔽。全部功能免费使用，打赏自愿，不限制任何功能。修复控制面板打赏按钮点击失效问题。【新增在线更新检测】
 // @author       AI Helper
 // @match        *://*.smartedu.cn/*
 // @grant        GM_xmlhttpRequest
@@ -52,7 +52,7 @@
         remoteScriptUrl: "https://raw.githubusercontent.com/你的用户名/仓库名/main/脚本文件名.user.js",
         currentVersion: "6.31",
         // 多久自动检测一次更新（小时）
-        checkUpdateIntervalHour: 24
+        检查更新间隔小时: 24
     };
 
     // ===================== 版本对比工具函数 =====================
